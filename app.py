@@ -3,111 +3,79 @@ import pandas as pd
 import numpy as np
 import requests
 import time
+from web3 import Web3
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Hybrid Gaus Radar", layout="wide")
-st.title("🛡️ Statistical Trading Radar (Real-Time)")
+st.set_page_config(page_title="Hybrid Network Gaus Radar", layout="wide", page_icon="🛡️")
+
+st.title("🛡️ Hybrid Network Statistical Radar")
+st.caption("Monitoring Hybrid Network Blocks & Prices via RPC")
 st.markdown("---")
 
-# --- Real-Time Price Fetcher ---
-def get_crypto_price(symbol):
+# --- Hybrid Network Connection ---
+# Use the official Hybrid RPC URL
+HYBRID_RPC_URL = "https://rpc.hybrid.network"
+w3 = Web3(Web3.HTTPProvider(HYBRID_RPC_URL))
+
+def get_hybrid_data():
     try:
-        # Fetching price from Binance Public API
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT"
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        return float(data['price'])
-    except Exception as e:
+        if w3.is_connected():
+            # In a real scenario, we fetch the latest block or a specific pair price
+            # For now, we will monitor the Latest Block Number as a proxy for activity
+            block = w3.eth.block_number
+            return float(block)
+        return None
+    except:
         return None
 
 # --- Sidebar Configuration ---
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    
-    # Asset Selection
-    coin = st.text_input("Coin Symbol (e.g., BTC, ETH, SOL)", value="BTC").upper()
+    st.header("⚙️ Hybrid Settings")
+    st.info("Connected to: Hybrid Mainnet")
     
     st.divider()
-    
-    # Telegram Security Credentials
     token = st.text_input("Telegram Bot Token", type="password")
-    chat_id = st.text_input("Your Chat ID")
+    chat_id = st.text_input("Telegram Chat ID")
     
     st.divider()
-    
-    # Gaussian Sensitivity (Z-Score Threshold)
-    threshold = st.slider("Sensitivity (Z-Score Threshold)", 1.5, 3.5, 2.0)
-    st.write("Higher threshold means fewer but more accurate alerts.")
+    threshold = st.slider("Z-Score Sensitivity", 1.5, 4.0, 2.0)
 
 # --- Statistical Engine ---
-def calculate_z_score(price_list):
-    if len(price_list) < 20: 
-        return 0
-    df = pd.DataFrame(price_list, columns=['price'])
-    mean = df['price'].mean()
-    std = df['price'].std()
-    # Z-Score formula: (Current Price - Mean) / Standard Deviation
-    z_score = (df['price'].iloc[-1] - mean) / std if std != 0 else 0
+def calculate_z_score(data_list):
+    if len(data_list) < 20: return 0
+    series = pd.Series(data_list)
+    z_score = (series.iloc[-1] - series.mean()) / series.std() if series.std() != 0 else 0
     return z_score
 
-# --- Main Dashboard Layout ---
+# --- Dashboard ---
 col1, col2 = st.columns([3, 1])
 chart_place = col1.empty()
 metric_place = col2.empty()
 
-# --- Execution Engine ---
-if st.button(f"Start Monitoring {coin}/USDT"):
+if st.button("🚀 Start Hybrid Monitoring"):
     if not token or not chat_id:
-        st.error("⚠️ Error: Please provide Telegram credentials in the sidebar.")
+        st.error("❌ Please enter Telegram credentials.")
     else:
-        st.success(f"System is now monitoring {coin}/USDT in real-time.")
+        st.success("Connected to Hybrid Network. Analyzing Blocks...")
+        data_history = []
         
-        # Initialization
-        price_history = []
-        
-        # Send Start Notification to Telegram
-        welcome_msg = f"🚀 *Hybrid Gaus Bot Started*\nAsset: {coin}/USDT\nThreshold: {threshold}"
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                      json={"chat_id": chat_id, "text": welcome_msg, "parse_mode": "Markdown"})
-
-        # Live Monitoring Loop
         while True:
-            current_p = get_crypto_price(coin)
-            
-            if current_p:
-                price_history.append(current_p)
+            current_val = get_hybrid_data()
+            if current_val:
+                data_history.append(current_val)
+                if len(data_history) > 60: data_history.pop(0)
                 
-                # Maintain buffer size (keep last 100 data points)
-                if len(price_history) > 100:
-                    price_history.pop(0)
+                z = calculate_z_score(data_history)
                 
-                # Calculate statistical deviation
-                z = calculate_z_score(price_history)
-                
-                # Update Chart
-                with chart_place.container():
-                    st.line_chart(price_history)
-                
-                # Update Metrics
+                chart_place.line_chart(data_history)
                 with metric_place.container():
-                    st.metric("Current Price", f"${current_p:,.2f}")
-                    st.metric("Z-Score (Deviation)", f"{z:.2f}")
-                
-                # Alert Logic
-                if len(price_history) >= 20:
-                    if z < -threshold:
-                        alert_msg = f"🟢 **BUY SIGNAL**: {coin} is Oversold! (Z-Score: {z:.2f})"
-                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                                      json={"chat_id": chat_id, "text": alert_msg, "parse_mode": "Markdown"})
-                        st.toast(alert_msg)
-                        
-                    elif z > threshold:
-                        alert_msg = f"🔴 **SELL SIGNAL**: {coin} is Overbought! (Z-Score: {z:.2f})"
-                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                                      json={"chat_id": chat_id, "text": alert_msg, "parse_mode": "Markdown"})
-                        st.toast(alert_msg)
+                    st.metric("Latest Hybrid Block", int(current_val))
+                    st.metric("Z-Score Deviation", f"{z:.2f}")
+
+                # Alerting Logic
+                if len(data_history) >= 20 and abs(z) > threshold:
+                    msg = f"⚠️ **Hybrid Network Alert**\nSignificant Statistical Deviation detected!\nZ-Score: {z:.2f}"
+                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                                  json={"chat_id": chat_id, "text": msg})
             
-            else:
-                st.warning("Connection lost. Retrying to fetch price...")
-            
-            time.sleep(5) # 5-second interval
+            time.sleep(3) # Hybrid block time is fast
