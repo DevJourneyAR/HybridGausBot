@@ -1,5 +1,5 @@
-web3
 streamlit
 pandas
 numpy
 requests
+web3
