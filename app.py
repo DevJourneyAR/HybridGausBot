@@ -4,68 +4,110 @@ import numpy as np
 import requests
 import time
 
-# --- إعدادات واجهة التطبيق ---
-st.set_page_config(page_title="Hybrid Gaus Bot", layout="wide")
-st.title("🛡️ نظام التداول الإحصائي الذكي")
+# --- Page Configuration ---
+st.set_page_config(page_title="Hybrid Gaus Radar", layout="wide")
+st.title("🛡️ Statistical Trading Radar (Real-Time)")
 st.markdown("---")
 
-# --- إدارة الأسرار (الأمان) ---
-# يحاول الكود قراءة التوكن من إعدادات الموقع المشفرة
-def get_config():
-    token = st.sidebar.text_input("Telegram Token", type="password")
-    chat_id = st.sidebar.text_input("Chat ID")
-    return token, chat_id
+# --- Real-Time Price Fetcher ---
+def get_crypto_price(symbol):
+    try:
+        # Fetching price from Binance Public API
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        return float(data['price'])
+    except Exception as e:
+        return None
 
-# --- محرك توزيع غاوس (المنطق الرياضي) ---
-def analyze_market(data):
-    df = pd.DataFrame(data, columns=['price'])
+# --- Sidebar Configuration ---
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    # Asset Selection
+    coin = st.text_input("Coin Symbol (e.g., BTC, ETH, SOL)", value="BTC").upper()
+    
+    st.divider()
+    
+    # Telegram Security Credentials
+    token = st.text_input("Telegram Bot Token", type="password")
+    chat_id = st.text_input("Your Chat ID")
+    
+    st.divider()
+    
+    # Gaussian Sensitivity (Z-Score Threshold)
+    threshold = st.slider("Sensitivity (Z-Score Threshold)", 1.5, 3.5, 2.0)
+    st.write("Higher threshold means fewer but more accurate alerts.")
+
+# --- Statistical Engine ---
+def calculate_z_score(price_list):
+    if len(price_list) < 20: 
+        return 0
+    df = pd.DataFrame(price_list, columns=['price'])
     mean = df['price'].mean()
     std = df['price'].std()
+    # Z-Score formula: (Current Price - Mean) / Standard Deviation
     z_score = (df['price'].iloc[-1] - mean) / std if std != 0 else 0
     return z_score
 
-# --- الشريط الجانبي ---
-token, chat_id = get_config()
-st.sidebar.info("تأكد من إدخال بيانات التلغرام لبدء استقبال التنبيهات.")
+# --- Main Dashboard Layout ---
+col1, col2 = st.columns([3, 1])
+chart_place = col1.empty()
+metric_place = col2.empty()
 
-# --- لوحة التحكم ---
-col1, col2 = st.columns([2, 1])
-
-if st.button("🚀 تشغيل محرك المراقبة"):
+# --- Execution Engine ---
+if st.button(f"Start Monitoring {coin}/USDT"):
     if not token or not chat_id:
-        st.error("❌ خطأ: يرجى إدخال التوكن والـ Chat ID أولاً!")
+        st.error("⚠️ Error: Please provide Telegram credentials in the sidebar.")
     else:
-        st.success("✅ البوت متصل الآن ويقوم بتحليل انحرافات الأسعار...")
+        st.success(f"System is now monitoring {coin}/USDT in real-time.")
         
-        # إرسال رسالة ترحيب لتأكيد الربط
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        requests.post(url, json={"chat_id": chat_id, "text": "✅ تم تشغيل تطبيق التداول بنجاح! جاري مراقبة السوق..."})
-
-        # محاكاة حركة السعر (هنا نربط مع Hybrid لاحقاً)
-        prices = [100.0]
+        # Initialization
+        price_history = []
         
-        with col1:
-            chart_placeholder = st.empty()
-        with col2:
-            metrics_placeholder = st.empty()
+        # Send Start Notification to Telegram
+        welcome_msg = f"🚀 *Hybrid Gaus Bot Started*\nAsset: {coin}/USDT\nThreshold: {threshold}"
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                      json={"chat_id": chat_id, "text": welcome_msg, "parse_mode": "Markdown"})
 
-        for i in range(50):
-            # توليد سعر عشوائي لمحاكاة التذبذب
-            new_price = prices[-1] + np.random.normal(0, 1)
-            prices.append(new_price)
+        # Live Monitoring Loop
+        while True:
+            current_p = get_crypto_price(coin)
             
-            if len(prices) > 20:
-                z = analyze_market(prices)
+            if current_p:
+                price_history.append(current_p)
                 
-                # تحديث الرسم البياني
-                chart_placeholder.line_chart(prices[-50:])
+                # Maintain buffer size (keep last 100 data points)
+                if len(price_history) > 100:
+                    price_history.pop(0)
                 
-                # تحديث المؤشرات
-                with metrics_placeholder.container():
-                    st.metric("Z-Score (انحراف غاوس)", f"{z:.2f}")
-                    if z < -2:
-                        st.success("🟢 فرصة شراء محتملة!")
-                    elif z > 2:
-                        st.warning("🔴 فرصة جني أرباح!")
-
-            time.sleep(1) # سرعة التحديث ثانية واحدة
+                # Calculate statistical deviation
+                z = calculate_z_score(price_history)
+                
+                # Update Chart
+                with chart_place.container():
+                    st.line_chart(price_history)
+                
+                # Update Metrics
+                with metric_place.container():
+                    st.metric("Current Price", f"${current_p:,.2f}")
+                    st.metric("Z-Score (Deviation)", f"{z:.2f}")
+                
+                # Alert Logic
+                if len(price_history) >= 20:
+                    if z < -threshold:
+                        alert_msg = f"🟢 **BUY SIGNAL**: {coin} is Oversold! (Z-Score: {z:.2f})"
+                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                                      json={"chat_id": chat_id, "text": alert_msg, "parse_mode": "Markdown"})
+                        st.toast(alert_msg)
+                        
+                    elif z > threshold:
+                        alert_msg = f"🔴 **SELL SIGNAL**: {coin} is Overbought! (Z-Score: {z:.2f})"
+                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                                      json={"chat_id": chat_id, "text": alert_msg, "parse_mode": "Markdown"})
+                        st.toast(alert_msg)
+            
+            else:
+                st.warning("Connection lost. Retrying to fetch price...")
+            
+            time.sleep(5) # 5-second interval
