@@ -5,81 +5,109 @@ import requests
 import time
 from web3 import Web3
 
-# --- Page Configuration ---
-st.set_page_config(page_title="Hybrid Network Gaus Radar", layout="wide", page_icon="🛡️")
+# --- Page Config ---
+st.set_page_config(page_title="Hybrid Network Radar", layout="wide", page_icon="🛡️")
 
+# Styling
+st.markdown("""<style> .main { background-color: #0e1117; } </style>""", unsafe_allow_html=True)
 st.title("🛡️ Hybrid Network Statistical Radar")
-st.caption("Monitoring Real-Time Blockchain Data via Hybrid RPC")
+st.caption("Monitoring Real-Time Blockchain Data via Official Hybrid RPC")
 st.markdown("---")
 
-# --- Hybrid Network Connection ---
-# Official Hybrid Testnet RPC URL
-HYBRID_RPC_URL = "https://rpc.testnet.hybrid.network" 
-w3 = Web3(Web3.HTTPProvider(HYBRID_RPC_URL))
+# --- Hybrid Network Connection Logic ---
+# Official Mainnet and Testnet fallbacks
+RPC_NODES = [
+    "https://rpc.hybrid.network",
+    "https://rpc.testnet.hybrid.network",
+    "https://rpc-testnet.hybrid.network"
+]
 
-def get_hybrid_data():
-    try:
-        if w3.is_connected():
-            # Monitoring the latest block number as a proxy for network pulse
-            block = w3.eth.block_number
-            return float(block)
-        return None
-    except Exception as e:
-        return None
+def connect_to_hybrid():
+    for node in RPC_NODES:
+        try:
+            w3 = Web3(Web3.HTTPProvider(node))
+            if w3.is_connected():
+                return w3, node
+        except:
+            continue
+    return None, None
 
-# --- Sidebar Configuration ---
+w3, active_node = connect_to_hybrid()
+
+# --- Sidebar ---
 with st.sidebar:
-    st.header("⚙️ Hybrid Settings")
-    if w3.is_connected():
-        st.success("Connected to Hybrid Network")
+    st.header("⚙️ System Configuration")
+    if w3:
+        st.success(f"Connected to Hybrid\nNode: {active_node}")
     else:
-        st.error("Not Connected to Hybrid")
+        st.error("❌ Link Broken: Not Connected to Hybrid")
+        if st.button("Retry Connection"):
+            st.rerun()
     
     st.divider()
-    token = st.text_input("Telegram Bot Token", type="password")
-    chat_id = st.text_input("Telegram Chat ID")
+    tg_token = st.text_input("Telegram Bot Token", type="password")
+    tg_chat_id = st.text_input("Your Chat ID", value="70697336")
     
     st.divider()
-    threshold = st.slider("Z-Score Sensitivity", 1.5, 4.0, 2.0)
+    sensitivity = st.slider("Z-Score Sensitivity", 1.5, 4.0, 2.0)
+    st.info("High sensitivity (low number) triggers more alerts.")
 
-# --- Statistical Engine ---
-def calculate_z_score(data_list):
-    if len(data_list) < 10: return 0
+# --- Analytics Engine ---
+def get_live_data():
+    if w3:
+        try:
+            # Monitoring block height as the primary live metric
+            return float(w3.eth.block_number)
+        except:
+            return None
+    return None
+
+def compute_z_score(data_list):
+    if len(data_list) < 15: return 0
     series = pd.Series(data_list)
-    z_score = (series.iloc[-1] - series.mean()) / series.std() if series.std() != 0 else 0
-    return z_score
+    std = series.std()
+    return (series.iloc[-1] - series.mean()) / std if std != 0 else 0
 
 # --- Dashboard Layout ---
-col1, col2 = st.columns([3, 1])
-chart_place = col1.empty()
-metric_place = col2.empty()
+col_main, col_stats = st.columns([3, 1])
+chart_area = col_main.empty()
+stats_area = col_stats.empty()
 
-# --- Execution Engine ---
+# --- Main Logic ---
 if st.button("🚀 Start Hybrid Monitoring"):
-    if not token or not chat_id:
-        st.error("❌ Please enter Telegram credentials.")
+    if not tg_token or not tg_chat_id:
+        st.error("Please enter Telegram Token first.")
+    elif not w3:
+        st.error("Cannot start: No connection to Hybrid Network.")
     else:
-        st.success("Hybrid Radar Online. Analyzing Blocks...")
-        data_history = []
+        st.success("Radar Active. Tracking Hybrid Blocks...")
+        history = []
         
+        # Send Start Message
+        try:
+            requests.post(f"https://api.telegram.org/bot{tg_token}/sendMessage", 
+                          json={"chat_id": tg_chat_id, "text": "🛡️ *Hybrid Radar Online*\nSystem connected to RPC."})
+        except:
+            pass
+
         while True:
-            current_val = get_hybrid_data()
-            if current_val:
-                data_history.append(current_val)
-                if len(data_history) > 50: data_history.pop(0)
+            val = get_live_data()
+            if val:
+                history.append(val)
+                if len(history) > 50: history.pop(0)
                 
-                z = calculate_z_score(data_history)
+                z = compute_z_score(history)
                 
                 # Update Visuals
-                chart_place.line_chart(data_history)
-                with metric_place.container():
-                    st.metric("Latest Hybrid Block", int(current_val))
-                    st.metric("Z-Score Deviation", f"{z:.2f}")
-
-                # Alerting Logic
-                if len(data_history) >= 10 and abs(z) > threshold:
-                    msg = f"⚠️ **Hybrid Network Alert**\nStatistical Deviation detected!\nZ-Score: {z:.2f}\nBlock: {int(current_val)}"
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                                  json={"chat_id": chat_id, "text": msg})
+                chart_area.line_chart(history)
+                with stats_area.container():
+                    st.metric("Latest Block", int(val))
+                    st.metric("Z-Score", f"{z:.2f}")
+                
+                # Alert Logic
+                if len(history) >= 15 and abs(z) > sensitivity:
+                    alert_msg = f"⚠️ *Hybrid Deviation Alert*\nZ-Score: {z:.2f}\nBlock: {int(val)}"
+                    requests.post(f"https://api.telegram.org/bot{tg_token}/sendMessage", 
+                                  json={"chat_id": tg_chat_id, "text": alert_msg})
             
-            time.sleep(2) # Refresh every 2 seconds for Hybrid blocks
+            time.sleep(3)
